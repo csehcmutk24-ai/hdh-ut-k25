@@ -318,7 +318,7 @@ int vmap_pgd_memset(struct pcb_t *caller, // process call
     printf("WARNING vmap_pgd_memset: address 0x%lx not page-aligned, aligning...\n", addr);
     addr = addr & ~(PAGING64_PAGESZ - 1); /* Align down to page boundary */
   }
-  addr_t pgn_start = PAGING_PGN(addr);
+  addr_t pgn_start = PAGING64_PGN(addr); // new fix 23/5/2020 1:37pm
 
   for (int i = 0; i < pgnum; i++)
   {
