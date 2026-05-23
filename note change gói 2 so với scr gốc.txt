@@ -1,0 +1,47 @@
+00h01p ngày 19/5/2026
+-sys_mem.c 
+-->int __sys_memmap
+	+thêm vòng lặp xử lí running list của krnl
+	+thêm điều kiện check nếu caller sai
+
+-libmem.c 
+--> thêm 2 hàm mới is_user_address và is_kernel_address 
+	+thêm ở cuối file, dùng để kiểm tra, phân loại ngay từ ban đầu địa chỉ thuộc user hay kernel
+
+0h37p 19/05/2026
+-libmem.c 
+--> libkmem_copy_from_user
+	+viết full cho func 
+--> libkmem_copy_to_user
+	+viết full cho func
+--> __read_user_mem
+	+viết return cho func
+--> __write_user_mem
+	+viết return cho func
+--> __read_kernel_mem
+	+viết lớp 5 tầng thỏa 64bit theo kiểu duyệt từng bit
+--> __write_kernel_mem
+	+viết lớp 5 tầng thỏa 64bit theo kiểu duyệt từng bit
+**LƯU Ý CHO kmalloc của Nam (sau khi t viết 5 tầng )
+	+Ông khi xin RAM cho Kernel thì ông phải cấp phát bộ nhớ cho từng mảng của cây phân trang (PGD trỏ xuống P4D, P4D trỏ xuống PUD...) nhé. Tôi dịch địa chỉ là tôi cứ bóc từng tầng ra đọc thôi!
+
+23h21 21/5/2026
+-mm64.c
+--> uint32_t pte_get_entry
+	+define code gà đọc bảng phân trang, sai chỗ nào return 0 chỗ đó
+--> int pte_set_swap 
+	+defince code Gắn một địa chỉ Ổ cứng (SWAP) (Set PTE entry for swapped page) vào bảng phân trang.
+--> int pte_set_fpn
+	+duyệt xuống thấy tầng nào chưa có mảng, dùng calloc(512, sizeof(addr_t)) để xin một mảng trống mới tinh gắp vào (512 là do mỗi tầng có 9 bit, $2^9 = 512$ phần tử).
+--> int vmap_pgd_memset
+	+tạo "Lazy Allocation" (Cấp phát lười). Khi một tiến trình muốn map một vùng nhớ ảo khổng lồ (ví dụ: cấp phát 100MB RAM), chúng ta không dại gì đi cấp phát 100MB RAM thật ngay lập tức. Thay vào đó, ta dùng hàm này để tạo sẵn "bộ khung" bảng phân trang (các tầng PGD, P4D, PUD, PMD, PT), đánh dấu các trang đó là chưa hiện diện (Present = 0). Khi nào CPU thực sự truy cập vào địa chỉ đó, cơ chế Page Fault mới kích hoạt và cấp phát RAM thật. 
+	+sử dụng vòng lặp for chạy qua từng trang (pgn), gọi hàm __get_pte_ptr để "dựng cây" (tạo các tầng thư mục nếu chưa có), và đánh dấu các entry này là sẵn sàng.
+
+9h00 22/5/2026
+-mm-vm.cc
+--> struct vm_rg_struct *get_vm_area_node_at_brk
+	+ mở mấy cái comment hướng dẫn của thầy ra, rồi sau đó hoàn thành nốt 
+--> int inc_vma_limit [Tăng giới hạn vùng nhớ ảo (Có kiểm tra Canonical Address)]
+	+ Khi biến hoặc dữ liệu của người dùng phình to ra, hệ thống gọi hàm inc_vma_limit để đẩy cái "đỉnh" của bộ nhớ (gọi là sbrk) lên cao hơn.
+	+ "WHY CANONICAL HERE" ==> Vì chuẩn 64-bit chia: Nửa dưới là User (bắt đầu bằng 0x000...), Nửa trên là Kernel (bắt đầu bằng 0xFFF...). Nếu bạn cho phép bộ nhớ User cứ thế phình to ra vô hạn, đến một lúc nào đó nó sẽ tràn lên chạm vào không gian Kernel. Chúng ta sẽ "cài cắm" Canonical Address vào ngay hàm này để chặn đứng mọi nỗ lực vượt rào!
+	

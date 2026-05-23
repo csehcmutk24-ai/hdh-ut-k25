@@ -1,0 +1,22 @@
+- mm-vm.c:
+  + Thêm inclusion `#include "mm64.h"` conditionally khi có định nghĩa macro `MM64` để nhận diện các hằng số 64-bit.
+  + Sửa lỗi typo biên dịch: `caller->kernl->mm` -> `caller->krnl->mm` tại hàm `get_vm_area_node_at_brk` (dòng 67).
+  + Sửa lỗi thiếu dấu chấm phẩy: `int incnumpage` -> `int incnumpage;` tại hàm `inc_vma_limit` (dòng 142).
+
+- libmem.c:
+  + Giữ nguyên và bảo toàn toàn bộ code tích hợp của Gói 2 (các hàm `is_user_address`, `is_kernel_address`, `libkmem_copy_from_user`, `libkmem_copy_to_user`, `__read_kernel_mem`, `__write_kernel_mem`, v.v.).
+  + Bảo toàn các phần code mẫu và comment gốc của thầy.
+  + Cấu trúc sẵn các hàm thuộc Gói 1 của bạn (`libkmem_malloc`, `__kmalloc`, `libkmem_cache_pool_create`, `libkmem_cache_alloc`, `__kmem_cache_alloc`) dưới dạng các khung xương (stubs) có thẻ `//TODO` để bạn tự viết logic.
+- include/mm.h:
+  + Thêm khai báo nguyên mẫu hàm `vm_map_ram` để sửa lỗi biên dịch "implicit declaration of function ‘vm_map_ram’" trong `mm-vm.c`.
+
+- include/mm64.h:
+  + Định nghĩa macro `PAGING64_PGN(addr)` (bằng phép dịch phải `((addr) >> PAGING64_ADDR_PT_SHIFT)`) để sửa lỗi biên dịch "implicit declaration of function ‘PAGING64_PGN’" trong `mm64.c`.
+
+- include/libmem.h:
+  + Thêm khai báo nguyên mẫu của hai hàm phân loại địa chỉ: `is_user_address` và `is_kernel_address` để tránh lỗi biên dịch ngầm định trong `libmem.c`.
+
+- libmem.c :
+  + libkmem_malloc & __kmalloc: Cấp phát trang vật lý từ RAM, cập nhật bảng ký hiệu `symrgtbl`, và đặc biệt xây dựng cơ chế ánh xạ qua bảng phân trang riêng 5 tầng `krnl_pgd` (PGD -> P4D -> PUD -> PMD -> PT) để Gói 2 dịch được địa chỉ vật lý chính xác.
+  + libkmem_cache_pool_create: Khởi tạo bảng danh sách quản lý khe cắm (slots) `kcpooltbl` và cấp phát một cục RAM lớn thông qua `__kmalloc`.
+  + libkmem_cache_alloc & __kmem_cache_alloc: Thiết lập giải thuật Slab Allocator, phân chia các slot trống từ bộ nhớ cache và ghi nhận vào bảng ký hiệu.
