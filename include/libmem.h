@@ -26,3 +26,5 @@ int libkmem_cache_alloc(struct pcb_t *, uint32_t, uint32_t);
 int libkmem_cache_pool_create(struct pcb_t*, uint32_t, uint32_t, uint32_t);
 int libkmem_copy_from_user(struct pcb_t*, uint32_t, uint32_t, uint32_t, uint32_t);
 int libkmem_copy_to_user(struct pcb_t*, uint32_t, uint32_t, uint32_t, uint32_t);
+int is_user_address(addr_t addr);  // new 23/5/2026 1:44 PM
+int is_kernel_address(addr_t addr); // new 23/5/2026 1:44 PM
