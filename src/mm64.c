@@ -699,15 +699,39 @@ int print_pgtbl(struct pcb_t *caller, addr_t start, addr_t end)
   // addr_t pgit;
   // struct krnl_t *krnl = caller->krnl;
 
-  addr_t pgd = 0;
-  addr_t p4d = 0;
-  addr_t pud = 0;
-  addr_t pmd = 0;
-  addr_t pt = 0;
+  // addr_t pgd = 0;
+  // addr_t p4d = 0;
+  // addr_t pud = 0;
+  // addr_t pmd = 0;
+  // addr_t pt = 0;
 
-  get_pd_from_address(start, &pgd, &p4d, &pud, &pmd, &pt);
+  // get_pd_from_address(start, &pgd, &p4d, &pud, &pmd, &pt);
 
   /* TODO traverse the page map and dump the page directory entries */
+
+  if (caller == NULL || caller->krnl == NULL || caller->krnl->mm == NULL || caller->krnl->mm->pgd == NULL)
+    return -1;
+
+  printf("print_pgtbl:\n");
+  addr_t *pgd_tbl = caller->krnl->mm->pgd;
+  for (int i = 0; i < 512; i++) {
+    if (pgd_tbl[i] != 0) {
+      addr_t *p4d_tbl = (addr_t *)pgd_tbl[i];
+      for (int j = 0; j < 512; j++) {
+        if (p4d_tbl[j] != 0) {
+          addr_t *pud_tbl = (addr_t *)p4d_tbl[j];
+          for (int k = 0; k < 512; k++) {
+            if (pud_tbl[k] != 0) {
+              addr_t *pmd_tbl = (addr_t *)pud_tbl[k];
+              printf(" PDG=" FORMATX_ADDR " PDG=" FORMATX_ADDR " P4g=" FORMATX_ADDR " PUD=" FORMATX_ADDR " PMD=" FORMATX_ADDR "\n",
+                     pgd_tbl, pgd_tbl, p4d_tbl, pud_tbl, pmd_tbl);
+              return 0;
+            }
+          }
+        }
+      }
+    }
+  }
 
   return 0;
 }
