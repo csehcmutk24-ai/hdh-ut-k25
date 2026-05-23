@@ -83,7 +83,7 @@ int __alloc(struct pcb_t *caller, int vmaid, int rgid, addr_t size, addr_t *allo
  
     *alloc_addr = rgnode.rg_start;
 
-    // phusccea
+     
 #ifdef IODUMP
     printf("ALLOC: Successfully acquired from freerg_list | PID=%d | rgid=%d | size=%d | addr=%08x\n", caller->pid, rgid, size, *alloc_addr);
 #endif
@@ -125,7 +125,7 @@ int __alloc(struct pcb_t *caller, int vmaid, int rgid, addr_t size, addr_t *allo
 
   *alloc_addr = old_sbrk;
 
-// phusccea
+ 
 #ifdef IODUMP
   printf("ALLOC: VMA limit increased successfully | PID=%d | rgid=%d | size=%d | addr=%08x\n", caller->pid, rgid, size, *alloc_addr);
 #endif
@@ -211,14 +211,14 @@ int libfree(struct pcb_t *proc, uint32_t reg_index)
   {
     return -1;
   }
-//printf("%s:%d\n",__func__,__LINE__);
+
 //#ifdef IODUMP
 //  /* TODO dump IO content (if needed) */
 #ifdef PAGETBL_DUMP
   print_pgtbl(proc, 0, -1); // print max TBL
 #endif
 //#endif
-  return 0;//val;
+  return 0;
 }
 
 /*pg_getpage - get the page in ram
@@ -228,14 +228,14 @@ int libfree(struct pcb_t *proc, uint32_t reg_index)
  *@caller: caller
  *
  */
-// checkthinh
+ 
 int pg_getpage(struct mm_struct *mm, int pgn, int *fpn, struct pcb_t *caller)
 {
 
   uint32_t pte = pte_get_entry(caller, pgn);
 
   if (!PAGING_PAGE_PRESENT(pte))
-  { /* Page is not online, make it actively living */
+  { /* Page is not online, make it living */
     addr_t vicpgn, swpfpn;
     addr_t vicfpn;
     uint32_t vicpte;
@@ -291,7 +291,7 @@ int pg_getpage(struct mm_struct *mm, int pgn, int *fpn, struct pcb_t *caller)
  *@value: value
  *
  */
-// checkthinh
+ 
 int pg_getval(struct mm_struct *mm, int addr, BYTE *data, struct pcb_t *caller)
 {
   int pgn = PAGING_PGN(addr);
@@ -318,7 +318,7 @@ int pg_getval(struct mm_struct *mm, int addr, BYTE *data, struct pcb_t *caller)
  *@value: value
  *
  */
-// checkthinh
+ 
 int pg_setval(struct mm_struct *mm, int addr, BYTE value, struct pcb_t *caller)
 {
   int pgn = PAGING_PGN(addr);
@@ -349,7 +349,7 @@ int pg_setval(struct mm_struct *mm, int addr, BYTE value, struct pcb_t *caller)
  *@size: allocated size
  *
  */
-// checkthinh
+ 
 int __read(struct pcb_t *caller, int vmaid, int rgid, addr_t offset, BYTE *data)
 {
   struct vm_rg_struct *currg = get_symrg_byid(caller->krnl->mm, rgid);
@@ -377,7 +377,7 @@ int libread(
     uint32_t* destination)
 {
   BYTE data;
-//printf("%s:%d\n",__func__,__LINE__);
+
   int val = __read(proc, 0, source, offset, &data);
 
   *destination = data;
@@ -765,23 +765,18 @@ int __read_kernel_mem(struct pcb_t *caller, int vmaid, int rgid, addr_t offset, 
  
   if (caller->krnl->krnl_pgd == NULL) return -1; 
     
-  // Tầng PGD 
   addr_t *p4d_table = (addr_t *)caller->krnl->krnl_pgd[pgd_idx];
   if (p4d_table == NULL) return -1; 
 
-  // Tầng P4D 
   addr_t *pud_table = (addr_t *)p4d_table[p4d_idx];
   if (pud_table == NULL) return -1;
 
-  // Tầng PUD
   addr_t *pmd_table = (addr_t *)pud_table[pud_idx];
   if (pmd_table == NULL) return -1;
 
-  // Tầng PMD
   addr_t *pt_table = (addr_t *)pmd_table[pmd_idx];
   if (pt_table == NULL) return -1;
 
-  // Tầng PT 
   addr_t pte = pt_table[pt_idx];
 
 
@@ -930,29 +925,6 @@ int free_pcb_memph(struct pcb_t *caller)
   pthread_mutex_unlock(&mmvm_lock);
   return 0;
 
-  // pthread_mutex_lock(&mmvm_lock);
-  // int pagenum, fpn;
-  // uint32_t pte;
-
-  // struct vm_area_struct *cur_vma = get_vma_by_num(caller->krnl->mm, 0);
-  // int max_user_pgn = 0;
-  // if (cur_vma != NULL) {
-  //     max_user_pgn = cur_vma->sbrk / PAGING64_PAGESZ;
-  // }
-
-  // for (pagenum = 0; pagenum <= max_user_pgn; pagenum++)
-  // {
-  //   pte = pte_get_entry(caller, pagenum);
-
-  //   if (PAGING_PAGE_PRESENT(pte))
-  //   {
-  //     fpn = PAGING_FPN(pte);
-  //     MEMPHY_put_freefp(caller->krnl->mram, fpn);
-  //   }
-  // }
-
-  // pthread_mutex_unlock(&mmvm_lock);
-  // return 0;
 }
 
 
@@ -977,8 +949,7 @@ int find_victim_page(struct mm_struct *mm, addr_t *retpgn)
     pg = pg->pg_next;
   }
   *retpgn = pg->pgn;
-  
-  //fix 3:20pm 23/05
+
   if (prev == NULL) 
   {
     mm->fifo_pgn = NULL;
@@ -987,7 +958,7 @@ int find_victim_page(struct mm_struct *mm, addr_t *retpgn)
   {
     prev->pg_next = NULL;
   }
-  //fix
+ 
 
   free(pg);
 
@@ -1026,7 +997,7 @@ int get_free_vmrg_area(struct pcb_t *caller, int vmaid, int size, struct vm_rg_s
         rgit->rg_start = rgit->rg_start + size;
       }
       else
-      { /*Use up all space, remove current node */
+      {
         /*Clone next rg node */
         struct vm_rg_struct *nextrg = rgit->rg_next;
 
