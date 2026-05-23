@@ -977,7 +977,17 @@ int find_victim_page(struct mm_struct *mm, addr_t *retpgn)
     pg = pg->pg_next;
   }
   *retpgn = pg->pgn;
-  prev->pg_next = NULL;
+  
+  //fix 3:20pm 23/05
+  if (prev == NULL) 
+  {
+    mm->fifo_pgn = NULL;
+  } 
+  else 
+  {
+    prev->pg_next = NULL;
+  }
+  //fix
 
   free(pg);
 
