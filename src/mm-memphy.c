@@ -168,7 +168,7 @@ int MEMPHY_get_freefp(struct memphy_struct *mp, addr_t *retfpn)
    return 0;
 }
 
-// checkthinh
+
 int MEMPHY_dump(struct memphy_struct *mp)
 {
    /*TODO dump memphy contnt mp->storage
