@@ -721,29 +721,38 @@ int libkmem_copy_from_user(struct pcb_t *caller, uint32_t source, uint32_t desti
    */
   //__read_user_mem(...)
   //__write_kernel_mem(...);
-  addr_t user_addr = caller->regs[source] + offset;
-  if (!is_user_address(user_addr)) return -1;
+  
+    // Ép kiểu (addr_t) để tránh tràn số khi cộng offset trong môi trường 64-bit
+    addr_t user_addr = (addr_t)caller->regs[source] + offset;
+    addr_t krnl_addr = (addr_t)caller->regs[destination];
 
+    /* 2. CHỐT CHẶN BẢO MẬT CANONICAL (Quét toàn bộ dải size)
+     * Đảm bảo không có bất kỳ byte nào đâm thủng ranh giới.
+     */
+    if (!is_user_address(user_addr) || !is_user_address(user_addr + size - 1)) {
+        printf("SECURITY FAULT: Nguon doc vuot bien User Space!\n");
+        return -1;
+    }
+    if (!is_kernel_address(krnl_addr) || !is_kernel_address(krnl_addr + size - 1)) {
+        printf("SECURITY FAULT: Dich ghi khong nam trong Kernel Space!\n");
+        return -1;
+    }
 
-
-  addr_t krnl_addr = caller->regs[destination];
-  if (!is_kernel_address(krnl_addr)) return -1;
-
-  /* Copy one by at one time*/
-  for (uint32_t i = 0; i < size; i++) {
-      BYTE data = 0;
-      
-      // Read 1 byte from User space
-      if (__read_user_mem(caller, -1, -1, user_addr + i, &data) != 0) {
-          return -1;
-      }
-      
-      // Write 1 byte to Kernel space
-      if (__write_kernel_mem(caller, -1, -1, krnl_addr + i, data) != 0) {
-          return -1; 
-      }
-  }
-  return 0;
+    /* 3. Copy từng byte qua cầu nối phân trang */
+    for (uint32_t i = 0; i < size; i++) {
+        BYTE data = 0;
+        
+        // Truyền -1 để ép hàm sử dụng trực tiếp địa chỉ (user_addr + i)
+        if (__read_user_mem(caller, -1, -1, user_addr + i, &data) != 0) {
+            return -1;
+        }
+        
+        if (__write_kernel_mem(caller, -1, -1, krnl_addr + i, data) != 0) {
+            return -1; 
+        }
+    }
+    
+    return 0;
 }
 
 int libkmem_copy_to_user(struct pcb_t *caller, uint32_t source, uint32_t destination, uint32_t offset, uint32_t size)
@@ -756,18 +765,35 @@ int libkmem_copy_to_user(struct pcb_t *caller, uint32_t source, uint32_t destina
   //__read_kernel_mem(...)
   //__write_user_mem(...);
 
-  addr_t kernel_addr = caller->regs[source] + offset;
-  addr_t user_addr = caller->regs[destination];
+  /* 1. Lấy địa chỉ ảo từ thanh ghi */
+    addr_t kernel_addr = (addr_t)caller->regs[source] + offset;
+    addr_t user_addr = (addr_t)caller->regs[destination];
 
-  if (!is_kernel_address(kernel_addr)) return -1;
-  if (!is_user_address(user_addr)) return -1;
+    /* 2. CHỐT CHẶN BẢO MẬT CANONICAL */
+    if (!is_kernel_address(kernel_addr) || !is_kernel_address(kernel_addr + size - 1)) {
+        printf("SECURITY FAULT: Nguon doc khong nam trong Kernel Space!\n");
+        return -1;
+    }
+    if (!is_user_address(user_addr) || !is_user_address(user_addr + size - 1)) {
+        printf("SECURITY FAULT: Dich ghi vuot bien User Space!\n");
+        return -1;
+    }
 
-  for (uint32_t i = 0; i < size; i++) {
-      BYTE data = 0;
-      if (__read_kernel_mem(caller, -1, -1, kernel_addr + i, &data) != 0) return -1;
-      if (__write_user_mem(caller, -1, -1, user_addr + i, data) != 0) return -1;
-  }
-  return 0;
+    /* 3. Copy từng byte qua cầu nối phân trang */
+    for (uint32_t i = 0; i < size; i++) {
+        BYTE data = 0;
+        
+        // Truyền -1 để sử dụng trực tiếp địa chỉ tính toán
+        if (__read_kernel_mem(caller, -1, -1, kernel_addr + i, &data) != 0) {
+            return -1;
+        }
+        
+        if (__write_user_mem(caller, -1, -1, user_addr + i, data) != 0) {
+            return -1;
+        }
+    }
+    
+    return 0;
 }
 
 
@@ -780,9 +806,7 @@ int libkmem_copy_to_user(struct pcb_t *caller, uint32_t source, uint32_t destina
  */
 int __read_kernel_mem(struct pcb_t *caller, int vmaid, int rgid, addr_t offset, BYTE *data)
 {
-  /* TODO: provide OS memory operator for kernel memory region */
-  //krnl->krnl_pgd ... or krnl->pgd ... based on kmem implementation strategy
-  
+  /* 1. KẾ THỪA LOGIC CŨ: Dịch địa chỉ ảo từ rgid và offset */
   addr_t access_addr = offset;
   if (rgid >= 0 && rgid < PAGING_MAX_SYMTBL_SZ) {
       struct vm_rg_struct *currg = get_symrg_byid(caller->krnl->mm, rgid);
@@ -791,42 +815,25 @@ int __read_kernel_mem(struct pcb_t *caller, int vmaid, int rgid, addr_t offset, 
       }
   }
 
+  /* 2. LỘI 5 TẦNG BẰNG HELPER (Thay cho đoạn get_pd_from_address cồng kềnh) */
+  // Helper này đã tự xử lý 5 tầng if(NULL) và tự gọt bỏ phần 0xFF... của Kernel
+  addr_t *pte = get_pte_ptr_no_alloc(caller->krnl->mm, access_addr);
 
-  addr_t pgd_idx = 0, p4d_idx = 0, pud_idx = 0, pmd_idx = 0, pt_idx = 0;
-  get_pd_from_address(access_addr, &pgd_idx, &p4d_idx, &pud_idx, &pmd_idx, &pt_idx);
-
- 
-  if (caller->krnl->krnl_pgd == NULL) return -1; 
-    
-  // Tầng PGD 
-  addr_t *p4d_table = (addr_t *)caller->krnl->krnl_pgd[pgd_idx];
-  if (p4d_table == NULL) return -1; 
-
-  // Tầng P4D 
-  addr_t *pud_table = (addr_t *)p4d_table[p4d_idx];
-  if (pud_table == NULL) return -1;
-
-  // Tầng PUD
-  addr_t *pmd_table = (addr_t *)pud_table[pud_idx];
-  if (pmd_table == NULL) return -1;
-
-  // Tầng PMD
-  addr_t *pt_table = (addr_t *)pmd_table[pmd_idx];
-  if (pt_table == NULL) return -1;
-
-  // Tầng PT 
-  addr_t pte = pt_table[pt_idx];
-
-
-  if (!PAGING_PAGE_PRESENT(pte)) {
+  if (pte == NULL || !PAGING_PAGE_PRESENT(*pte)) {
+      // Báo lỗi Page Fault (Kernel bắt buộc phải nằm trên RAM, không dùng SWAP)
+      printf("KERNEL PAGE FAULT: Khong the doc dia chi 0x%lx\n", access_addr);
       return -1; 
   }
 
-  int fpn = PAGING_FPN(pte);
-  int off = PAGING_OFFST(access_addr);
-  addr_t phyaddr = (fpn * PAGING_PAGESZ) + off;
+  /* 3. TÍNH ĐỊA CHỈ VẬT LÝ THEO CHUẨN 64-BIT */
+  // Dùng GETVAL thay cho PAGING_FPN cũ để bóc bit chính xác
+  addr_t fpn = GETVAL(*pte, PAGING_PTE_FPN_MASK, PAGING_PTE_FPN_LOBIT);
+  addr_t off = access_addr % PAGING64_PAGESZ;
+  
+  // Dịch trái 12 bit (thay cho phép nhân PAGING_PAGESZ) để chống tràn số
+  addr_t phyaddr = (fpn << PAGING64_ADDR_PT_LOBIT) + off;
     
-
+  /* 4. ĐỌC TỪ MRAM */
   MEMPHY_read(caller->krnl->mram, phyaddr, data);
   
   return 0;
@@ -841,9 +848,7 @@ int __read_kernel_mem(struct pcb_t *caller, int vmaid, int rgid, addr_t offset, 
  */
 int __write_kernel_mem(struct pcb_t *caller, int vmaid, int rgid, addr_t offset, BYTE value)
 {
-  /* TODO: provide OS memory operator for kernel memory region */
-  //krnl->krnl_pgd ... or krnl->pgd ... based on kmem implementation strategy
-  
+  /* 1. Dịch địa chỉ ảo */
   addr_t access_addr = offset;
   if (rgid >= 0 && rgid < PAGING_MAX_SYMTBL_SZ) {
       struct vm_rg_struct *currg = get_symrg_byid(caller->krnl->mm, rgid);
@@ -852,35 +857,20 @@ int __write_kernel_mem(struct pcb_t *caller, int vmaid, int rgid, addr_t offset,
       }
   }
 
-  
-  addr_t pgd_idx = 0, p4d_idx = 0, pud_idx = 0, pmd_idx = 0, pt_idx = 0;
-  get_pd_from_address(access_addr, &pgd_idx, &p4d_idx, &pud_idx, &pmd_idx, &pt_idx);
+  /* 2. Lội 5 tầng bằng Helper */
+  addr_t *pte = get_pte_ptr_no_alloc(caller->krnl->mm, access_addr);
 
-
-  if (caller->krnl->krnl_pgd == NULL) return -1;
-    
-  addr_t *p4d_table = (addr_t *)caller->krnl->krnl_pgd[pgd_idx];
-  if (p4d_table == NULL) return -1;
-
-  addr_t *pud_table = (addr_t *)p4d_table[p4d_idx];
-  if (pud_table == NULL) return -1;
-
-  addr_t *pmd_table = (addr_t *)pud_table[pud_idx];
-  if (pmd_table == NULL) return -1;
-
-  addr_t *pt_table = (addr_t *)pmd_table[pmd_idx];
-  if (pt_table == NULL) return -1;
-
-  addr_t pte = pt_table[pt_idx];
-
-  if (!PAGING_PAGE_PRESENT(pte)) {
+  if (pte == NULL || !PAGING_PAGE_PRESENT(*pte)) {
+      printf("KERNEL PAGE FAULT: Khong the ghi vao dia chi 0x%lx\n", access_addr);
       return -1; 
   }
 
-  int fpn = PAGING_FPN(pte);
-  int off = PAGING_OFFST(access_addr);
-  addr_t phyaddr = (fpn * PAGING_PAGESZ) + off;
+  /* 3. Tính địa chỉ vật lý */
+  addr_t fpn = GETVAL(*pte, PAGING_PTE_FPN_MASK, PAGING_PTE_FPN_LOBIT);
+  addr_t off = access_addr % PAGING64_PAGESZ;
+  addr_t phyaddr = (fpn << PAGING64_ADDR_PT_LOBIT) + off;
     
+  /* 4. GHI XUỐNG MRAM */
   MEMPHY_write(caller->krnl->mram, phyaddr, value);
     
   return 0;  
@@ -1114,15 +1104,15 @@ int get_free_vmrg_area(struct pcb_t *caller, int vmaid, int size, struct vm_rg_s
   return 0;
 }
 
-/* Check user or kernel address using memory layout boundaries */
+/* Kiểm tra xem địa chỉ có thuộc User Space (VMA0) không */
 int is_user_address(addr_t addr) {
-    return (addr >= USER_START && addr <= USER_END);
+    return (addr >> 57) == 0;
 }
 
+
 int is_kernel_address(addr_t addr) {
-    return ((addr >= KERNEL_DIRECT_START && addr <= KERNEL_DIRECT_END) ||
-            (addr >= KERNEL_ALLOC_START && addr <= KERNEL_ALLOC_END) ||
-            (addr >= KERNEL_PGTBL_START && addr <= KERNEL_PGTBL_END));
+
+    return (addr >> 57) == 0x7F;
 }
 
 
