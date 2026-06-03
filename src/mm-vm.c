@@ -160,11 +160,9 @@ int inc_vma_limit(struct pcb_t *caller, int vmaid, addr_t inc_sz)
       if (area) free(area);
       return -1;
   }
-
 #ifdef MM64
-  if (area->rg_end > USER_END) {
-      printf("Error: sbrk growth exceeds User Space limit (USER_END=0x%llx)!\n",
-             (unsigned long long)USER_END);
+  if (!is_user_address(area->rg_end - 1)) {
+      printf("Canonical Error: Out of User Space memory boundaries!\n");
       free(newrg);
       free(area);
       return -1;
@@ -187,9 +185,27 @@ int inc_vma_limit(struct pcb_t *caller, int vmaid, addr_t inc_sz)
   cur_vma->vm_end += inc_amt;
   cur_vma->sbrk += inc_amt;
 
+  int inc_limit_ret = 0;
   /* The obtained vm area (only)
    * now will be alloc real ram region */
-  int inc_limit_ret = vm_map_ram(caller, area->rg_start, area->rg_end, old_end, incnumpage, newrg);
+  #ifdef MM64
+  /* * CHẾ ĐỘ 64-BIT (LAZY ALLOCATION) 
+   */
+  inc_limit_ret = vmap_pgd_memset(caller, area->rg_start, incnumpage);
+
+  if (inc_limit_ret == 0) {
+      // Cấu hình newrg và tự tay đưa vào danh sách vùng trống (vì đã bỏ qua vm_map_ram)
+      newrg->rg_start = area->rg_start;
+      newrg->rg_end = area->rg_end;
+      newrg->rg_next = NULL;
+      enlist_vm_freerg_list(caller->krnl->mm, newrg); 
+  }
+#else
+  /* * CHẾ ĐỘ 32-BIT (STRICT ALLOCATION)
+   * Giữ nguyên logic cũ: Gọi vm_map_ram để map thẳng vào mảng mram vật lý.
+   */
+  inc_limit_ret = vm_map_ram(caller, area->rg_start, area->rg_end, old_end, incnumpage, newrg);
+#endif
   if (inc_limit_ret < 0) {
     cur_vma->vm_end -= inc_amt;
     cur_vma->sbrk -= inc_amt;
