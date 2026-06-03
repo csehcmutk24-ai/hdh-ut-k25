@@ -182,4 +182,8 @@ int print_list_vma(struct vm_area_struct *rg);
 
 int print_list_pgn(struct pgn_t *ip);
 int print_pgtbl(struct pcb_t *ip, addr_t start, addr_t end);
+
+/* helper for 5 page directories */
+addr_t* get_pte_ptr_alloc(struct mm_struct *mm, addr_t addr);
+addr_t* get_pte_ptr_no_alloc(struct mm_struct *mm, addr_t addr);
 #endif
