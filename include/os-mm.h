@@ -44,6 +44,21 @@ typedef ADDR_TYPE addr_t;
 #define FORMATX_ADDR "%08x"
 #endif
 
+/* Memory Layout Boundaries (from memlayout-after change.xlsx) */
+#ifdef MM64
+#define USER_START            0x0000000000000000ULL
+#define USER_END              0x00ffffffffffffffULL
+
+#define KERNEL_DIRECT_START   0xff11000000000000ULL
+#define KERNEL_DIRECT_END     0xff50ffffffffffffULL
+
+#define KERNEL_ALLOC_START    0xff60000000000000ULL
+#define KERNEL_ALLOC_END      0xffdfffffffffffffULL
+
+#define KERNEL_PGTBL_START    0xffffffff80000000ULL
+#define KERNEL_PGTBL_END      0xffffffffbfffffffULL
+#endif
+
 struct pgn_t{
    addr_t pgn;
    struct pgn_t *pg_next; 

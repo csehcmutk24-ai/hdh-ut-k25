@@ -294,14 +294,23 @@ int pg_getpage(struct mm_struct *mm, int pgn, int *fpn, struct pcb_t *caller)
 // checkthinh
 int pg_getval(struct mm_struct *mm, int addr, BYTE *data, struct pcb_t *caller)
 {
+#ifdef MM64
+  int pgn = PAGING64_PGN(addr);
+  int off = PAGING64_OFFST(addr);
+#else
   int pgn = PAGING_PGN(addr);
   int off = PAGING_OFFST(addr);
+#endif
   int fpn;
 
   if (pg_getpage(mm, pgn, &fpn, caller) != 0)
     return -1; /* invalid page access */
 
+#ifdef MM64
+  int phyaddr = fpn * PAGING64_PAGESZ + off;
+#else
   int phyaddr = (fpn << PAGING_ADDR_FPN_LOBIT) + off;
+#endif
 
   /* TODO
    *  MEMPHY_read(caller->krnl->mram, phyaddr, data);
@@ -321,15 +330,24 @@ int pg_getval(struct mm_struct *mm, int addr, BYTE *data, struct pcb_t *caller)
 // checkthinh
 int pg_setval(struct mm_struct *mm, int addr, BYTE value, struct pcb_t *caller)
 {
+#ifdef MM64
+  int pgn = PAGING64_PGN(addr);
+  int off = PAGING64_OFFST(addr);
+#else
   int pgn = PAGING_PGN(addr);
   int off = PAGING_OFFST(addr);
+#endif
   int fpn;
 
   /* Get the page to MEMRAM, swap from MEMSWAP if needed */
   if (pg_getpage(mm, pgn, &fpn, caller) != 0)
     return -1; /* invalid page access */
 
+#ifdef MM64
+  int phyaddr = fpn * PAGING64_PAGESZ + off;
+#else
   int phyaddr = (fpn << PAGING_ADDR_FPN_LOBIT) + off;
+#endif
 
   /* TODO
    *  MEMPHY_write(caller->krnl->mram, phyaddr, value);
@@ -359,6 +377,12 @@ int __read(struct pcb_t *caller, int vmaid, int rgid, addr_t offset, BYTE *data)
   /* TODO Invalid memory identify */
   if (currg == NULL || cur_vma == NULL)
     return -1;
+
+#ifdef MM64
+  /* Validate user space address boundary */
+  if (vmaid == 0 && !is_user_address(currg->rg_start + offset))
+    return -1;
+#endif
 
   /* Check if the offset is within the allocated region */
   if (currg->rg_start + offset >= currg->rg_end)
@@ -411,6 +435,15 @@ int __write(struct pcb_t *caller, int vmaid, int rgid, addr_t offset, BYTE value
     pthread_mutex_unlock(&mmvm_lock);
     return -1;
   }
+
+#ifdef MM64
+  /* Validate user space address boundary */
+  if (vmaid == 0 && !is_user_address(currg->rg_start + offset))
+  {
+    pthread_mutex_unlock(&mmvm_lock);
+    return -1;
+  }
+#endif
 
   pg_setval(caller->krnl->mm, currg->rg_start + offset, value, caller);
 
@@ -911,6 +944,26 @@ int free_pcb_memph(struct pcb_t *caller)
   int pagenum, fpn;
   uint32_t pte;
 
+#ifdef MM64
+  {
+    struct vm_area_struct *cur_vma = get_vma_by_num(caller->krnl->mm, 0);
+    int max_user_pgn = 0;
+    if (cur_vma != NULL) {
+        max_user_pgn = cur_vma->sbrk / PAGING64_PAGESZ;
+    }
+
+    for (pagenum = 0; pagenum < max_user_pgn; pagenum++)
+    {
+      pte = pte_get_entry(caller, pagenum);
+
+      if (PAGING_PAGE_PRESENT(pte))
+      {
+        fpn = PAGING_FPN(pte);
+        MEMPHY_put_freefp(caller->krnl->mram, fpn);
+      }
+    }
+  }
+#else
   for (pagenum = 0; pagenum < PAGING_MAX_PGN; pagenum++)
   {
     pte = caller->krnl->mm->pgd[pagenum];
@@ -926,6 +979,7 @@ int free_pcb_memph(struct pcb_t *caller)
       MEMPHY_put_freefp(caller->krnl->active_mswp, fpn);
     }
   }
+#endif
 
   pthread_mutex_unlock(&mmvm_lock);
   return 0;
@@ -1060,24 +1114,15 @@ int get_free_vmrg_area(struct pcb_t *caller, int vmaid, int size, struct vm_rg_s
   return 0;
 }
 
-/* Check dchi user or kernel */
+/* Check user or kernel address using memory layout boundaries */
 int is_user_address(addr_t addr) {
-    /* Move right 57 bit take 7 bit cao I. If User, must == 0 */
-    addr_t high_bits = addr >> 57;
-    if (high_bits == 0) {
-        return 1; 
-    }
-    return 0; 
+    return (addr >= USER_START && addr <= USER_END);
 }
 
-
 int is_kernel_address(addr_t addr) {
-    /* Move right 57 bit. If Kernel, must be 1 */
-    addr_t high_bits = addr >> 57;
-    if (high_bits == 0x7F) {
-        return 1; 
-    }
-    return 0; 
+    return ((addr >= KERNEL_DIRECT_START && addr <= KERNEL_DIRECT_END) ||
+            (addr >= KERNEL_ALLOC_START && addr <= KERNEL_ALLOC_END) ||
+            (addr >= KERNEL_PGTBL_START && addr <= KERNEL_PGTBL_END));
 }
 
 

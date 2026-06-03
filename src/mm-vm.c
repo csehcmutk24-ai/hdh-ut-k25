@@ -162,8 +162,9 @@ int inc_vma_limit(struct pcb_t *caller, int vmaid, addr_t inc_sz)
   }
 
 #ifdef MM64
-  if ((area->rg_end >> 57) != 0) {
-      printf("Canonical Error: Out of User Space memory boundaries!\n");
+  if (area->rg_end > USER_END) {
+      printf("Error: sbrk growth exceeds User Space limit (USER_END=0x%llx)!\n",
+             (unsigned long long)USER_END);
       free(newrg);
       free(area);
       return -1;

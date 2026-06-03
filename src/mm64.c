@@ -374,14 +374,14 @@ addr_t vmap_page_range(struct pcb_t *caller,           // process call
   int pgit = 0;
 
   // Tính số thứ tự trang ảo cơ sở (Base Page Number) ngay từ đầu
-  addr_t pgn = PAGING_PGN(addr);
+  addr_t pgn = PAGING64_PGN(addr);
 
   /* TODO: update the rg_end and rg_start of ret_rg
   //ret_rg->rg_end =  ....
   //ret_rg->rg_start = ...
   //ret_rg->vmaid = ...
   */
-  ret_rg->rg_end = addr + (pgnum * PAGING_PAGESZ);
+  ret_rg->rg_end = addr + (pgnum * PAGING64_PAGESZ);
   ret_rg->rg_start = addr;
   ret_rg->vmaid = 0;
 
@@ -405,7 +405,7 @@ addr_t vmap_page_range(struct pcb_t *caller,           // process call
     pgit++;
   }
   // Cập nhật lại rg_end dựa trên số trang thực tế đã map được
-  ret_rg->rg_end = addr + (pgit * PAGING_PAGESZ);
+  ret_rg->rg_end = addr + (pgit * PAGING64_PAGESZ);
 
   return 0;
 }
@@ -565,9 +565,9 @@ int init_mm(struct mm_struct *mm, struct pcb_t *caller)
 
   /* By default the owner comes with at least one vma */
   vma0->vm_id = 0;
-  vma0->vm_start = 0;
-  vma0->vm_end = vma0->vm_start;
-  vma0->sbrk = vma0->vm_start;
+  vma0->vm_start = USER_START;
+  vma0->vm_end = USER_START;
+  vma0->sbrk = USER_START;
   vma0->vm_freerg_list = NULL;
   struct vm_rg_struct *first_rg = init_vm_rg(vma0->vm_start, vma0->vm_end);
   enlist_vm_rg_node(&vma0->vm_freerg_list, first_rg);

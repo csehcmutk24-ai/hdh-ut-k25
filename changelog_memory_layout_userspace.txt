@@ -1,0 +1,174 @@
+================================================================================
+CHANGELOG - Memory Layout Implementation (User Space)
+Date: 2026-06-01
+Author: Auto-generated
+================================================================================
+
+PURPOSE:
+  Integrate the new 64-bit memory layout (from memlayout-after change.xlsx)
+  into the User Space subsystem. This ensures user processes are confined
+  within the correct address range and all paging operations use the proper
+  4KB page size in MM64 mode.
+
+================================================================================
+CHANGE #1: Add Memory Layout Boundary Defines
+File: include/os-mm.h
+Lines: 47-59 (new block)
+--------------------------------------------------------------------------------
+Added 64-bit address boundary constants under #ifdef MM64:
+  - USER_START            = 0x0000000000000000
+  - USER_END              = 0x00ffffffffffffff
+  - KERNEL_DIRECT_START   = 0xff11000000000000
+  - KERNEL_DIRECT_END     = 0xff50ffffffffffff
+  - KERNEL_ALLOC_START    = 0xff60000000000000
+  - KERNEL_ALLOC_END      = 0xffdfffffffffffff
+  - KERNEL_PGTBL_START    = 0xffffffff80000000
+  - KERNEL_PGTBL_END      = 0xffffffffbfffffff
+
+Reason: Foundation for all address validation. Previously no boundary
+        constants existed; checks used hardcoded bit-shift values.
+
+================================================================================
+CHANGE #2: Fix pg_getval/pg_setval — Use PAGING64 macros
+File: src/libmem.c
+Functions: pg_getval(), pg_setval()
+--------------------------------------------------------------------------------
+BEFORE:
+  int pgn = PAGING_PGN(addr);       // 256B page (8-bit offset)
+  int off = PAGING_OFFST(addr);
+  int phyaddr = (fpn << PAGING_ADDR_FPN_LOBIT) + off;
+
+AFTER:
+  #ifdef MM64
+    int pgn = PAGING64_PGN(addr);   // 4KB page (12-bit offset)
+    int off = PAGING64_OFFST(addr);
+    int phyaddr = fpn * PAGING64_PAGESZ + off;
+  #else
+    int pgn = PAGING_PGN(addr);
+    int off = PAGING_OFFST(addr);
+    int phyaddr = (fpn << PAGING_ADDR_FPN_LOBIT) + off;
+  #endif
+
+Reason: CRITICAL BUG FIX. In MM64 mode, page size is 4KB (PAGING64_PAGESZ=4096)
+        but code was using 256B macros (PAGING_PAGESZ=256). This caused
+        READ/WRITE to compute wrong physical addresses, leading to data
+        corruption or segfaults.
+
+================================================================================
+CHANGE #3: Fix sbrk Boundary Check — Use USER_END
+File: src/mm-vm.c
+Function: inc_vma_limit()
+--------------------------------------------------------------------------------
+BEFORE:
+  if ((area->rg_end >> 57) != 0)   // allows up to 0x01ffffffffffffff
+
+AFTER:
+  if (area->rg_end > USER_END)     // correctly limits to 0x00ffffffffffffff
+
+Reason: The >>57 check was too permissive — it allowed user processes to
+        allocate memory beyond USER_END into the Non-Canonical Hole.
+
+================================================================================
+CHANGE #4: Initialize VMA0 with USER_START
+File: src/mm64.c
+Function: init_mm()
+--------------------------------------------------------------------------------
+BEFORE:
+  vma0->vm_start = 0;
+  vma0->vm_end = vma0->vm_start;
+  vma0->sbrk = vma0->vm_start;
+
+AFTER:
+  vma0->vm_start = USER_START;
+  vma0->vm_end = USER_START;
+  vma0->sbrk = USER_START;
+
+Reason: Self-documenting code. USER_START = 0 so the runtime value is
+        unchanged, but using the define makes the intent explicit for
+        reports and demos.
+
+================================================================================
+CHANGE #5: Fix vmap_page_range — Use PAGING64 macros
+File: src/mm64.c
+Function: vmap_page_range()
+--------------------------------------------------------------------------------
+Changed three lines:
+  - PAGING_PGN(addr)         → PAGING64_PGN(addr)
+  - pgnum * PAGING_PAGESZ    → pgnum * PAGING64_PAGESZ
+  - pgit * PAGING_PAGESZ     → pgit * PAGING64_PAGESZ
+
+Reason: mm64.c is compiled only in MM64 mode but was using 32-bit page
+        size constants (256B instead of 4KB), causing incorrect virtual
+        address range calculations during page mapping.
+
+
+
+================================================================================
+CHANGE #7: Fix free_pcb_memph — 5-Level Page Table Traversal
+File: src/libmem.c
+Function: free_pcb_memph()
+--------------------------------------------------------------------------------
+BEFORE:
+  for (pagenum = 0; pagenum < PAGING_MAX_PGN; pagenum++)
+    pte = caller->krnl->mm->pgd[pagenum];  // flat array access
+
+AFTER (MM64):
+  max_user_pgn = cur_vma->sbrk / PAGING64_PAGESZ;
+  for (pagenum = 0; pagenum < max_user_pgn; pagenum++)
+    pte = pte_get_entry(caller, pagenum);   // 5-level page table walk
+
+Reason: In MM64 mode, pgd is a 5-level tree structure, not a flat array.
+        Direct array access would crash or leak memory. The 32-bit code
+        path is preserved under #else.
+
+================================================================================
+CHANGE #8: Fix is_user_address / is_kernel_address
+File: src/libmem.c
+Functions: is_user_address(), is_kernel_address()
+--------------------------------------------------------------------------------
+BEFORE:
+  is_user_address:   (addr >> 57) == 0        // too permissive
+  is_kernel_address: (addr >> 57) == 0x7F     // too restrictive
+
+AFTER:
+  is_user_address:   addr >= USER_START && addr <= USER_END
+  is_kernel_address: checks all 3 kernel regions (DIRECT, ALLOC, PGTBL)
+
+Reason: Uses the exact boundary defines from the memory layout instead
+        of imprecise bit-shift heuristics.
+
+================================================================================
+CHANGE #9: Add Address Validation to __read / __write
+File: src/libmem.c
+Functions: __read(), __write()
+--------------------------------------------------------------------------------
+Added boundary check before memory access:
+  #ifdef MM64
+  if (vmaid == 0 && !is_user_address(currg->rg_start + offset))
+    return -1;
+  #endif
+
+Reason: Defense-in-depth. Even if sbrk boundary is correct, validate
+        every read/write to ensure user processes cannot access kernel
+        addresses through corrupted region metadata.
+
+================================================================================
+FILES MODIFIED (4 files):
+  1. include/os-mm.h      — Memory layout defines
+  2. src/mm64.c            — init_mm, vmap_page_range, __swap_cp_page
+  3. src/mm-vm.c           — inc_vma_limit boundary check
+  4. src/libmem.c          — pg_getval, pg_setval, free_pcb_memph,
+                             is_user_address, is_kernel_address,
+                             __read, __write
+
+COMPILATION STATUS:
+  ✅ No errors (gcc -fsyntax-only passes)
+  ⚠️ Pre-existing format warnings (%lu vs %llu on Windows) — not introduced
+     by these changes.
+
+TESTING RECOMMENDATION:
+  make clean && make all
+  ./os os_1_singleCPU_mlq_paging    # Basic alloc/read/write
+  ./os os_1_mlq_paging_small_4K     # Small RAM boundary test
+  ./os os_1_mlq_paging              # Multi-process isolation
+================================================================================
