@@ -126,7 +126,7 @@ int __read_kernel_mem(struct pcb_t *caller, int vmaid, int rgid, addr_t offset, 
 int __write_kernel_mem(struct pcb_t *caller, int vmaid, int rgid, addr_t offset, BYTE value);
 
 /* Page directory prototypes */
-int get_pd_from_address(addr_t addr, addr_t* pgd, addr_t* p4d, addr_t* pud, addr_t* pmd, addr_t* pt);
+addr_t* get_pd_from_address(struct pcb_t *caller, addr_t addr, int is_kernel);
 int get_pd_from_pagenum(addr_t pgn, addr_t* pgd, addr_t* p4d, addr_t* pud, addr_t* pmd, addr_t* pt);
 int pte_set_fpn(struct pcb_t *caller, addr_t pgn, addr_t fpn);
 int pte_set_swap(struct pcb_t *caller, addr_t pgn, int swptyp, addr_t swpoff);
@@ -186,4 +186,7 @@ int print_pgtbl(struct pcb_t *ip, addr_t start, addr_t end);
 /* helper for 5 page directories */
 addr_t* get_pte_ptr_alloc(struct mm_struct *mm, addr_t addr);
 addr_t* get_pte_ptr_no_alloc(struct mm_struct *mm, addr_t addr);
+int is_user_address(addr_t addr);
+int is_kernel_address(addr_t addr);
+int enlist_vm_freerg_list(struct mm_struct *mm, struct vm_rg_struct *rg_elmt);
 #endif
