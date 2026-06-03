@@ -21,6 +21,91 @@
 
 #if defined(MM64)
 
+
+
+
+/* Helper nội bộ: Lội 5 tầng tìm PTE (Không cấp phát thêm) */
+addr_t* get_pte_ptr_no_alloc(struct mm_struct *mm, addr_t addr) {
+    if (mm == NULL || mm->pgd == NULL) return NULL;
+
+    // Tách 5 index và tự động triệt tiêu bit Canonical bằng macro trong mm64.h
+    addr_t pgd = PAGING64_ADDR_PGD(addr);
+    addr_t p4d = PAGING64_ADDR_P4D(addr);
+    addr_t pud = PAGING64_ADDR_PUD(addr);
+    addr_t pmd = PAGING64_ADDR_PMD(addr);
+    addr_t pt  = PAGING64_ADDR_PT(addr);
+
+    addr_t *p4d_table = (addr_t *)mm->pgd[pgd];
+    if (p4d_table == NULL) return NULL;
+
+    addr_t *pud_table = (addr_t *)p4d_table[p4d];
+    if (pud_table == NULL) return NULL;
+
+    addr_t *pmd_table = (addr_t *)pud_table[pud];
+    if (pmd_table == NULL) return NULL;
+
+    addr_t *pt_table = (addr_t *)pmd_table[pmd];
+    if (pt_table == NULL) return NULL;
+
+    return &pt_table[pt];
+}
+
+
+
+
+/* * Helper: Lội cây 5 cấp và cấp phát lười (Lazy Allocation)
+ * Nhờ các macro trong mm64.h, các bit Canonical (top 7 bit) tự động bị triệt tiêu
+ * Index sinh ra luôn an toàn trong khoảng 0-511.
+ */
+addr_t* get_pte_ptr_alloc(struct mm_struct *mm, addr_t addr) {
+    if (mm == NULL) return NULL;
+
+    // 1. Tách 5 index bằng macro của mm64.h
+    addr_t pgd = PAGING64_ADDR_PGD(addr);
+    addr_t p4d = PAGING64_ADDR_P4D(addr);
+    addr_t pud = PAGING64_ADDR_PUD(addr);
+    addr_t pmd = PAGING64_ADDR_PMD(addr);
+    addr_t pt  = PAGING64_ADDR_PT(addr);
+
+    // 2. Tầng PGD
+    if (mm->pgd == NULL) {
+        mm->pgd = (addr_t *)calloc(512, sizeof(addr_t));
+    }
+    
+    // 3. Tầng P4D
+    addr_t *p4d_table = (addr_t *)mm->pgd[pgd];
+    if (p4d_table == NULL) {
+        p4d_table = (addr_t *)calloc(512, sizeof(addr_t));
+        mm->pgd[pgd] = (addr_t)p4d_table;
+    }
+
+    // 4. Tầng PUD
+    addr_t *pud_table = (addr_t *)p4d_table[p4d];
+    if (pud_table == NULL) {
+        pud_table = (addr_t *)calloc(512, sizeof(addr_t));
+        p4d_table[p4d] = (addr_t)pud_table;
+    }
+
+    // 5. Tầng PMD
+    addr_t *pmd_table = (addr_t *)pud_table[pud];
+    if (pmd_table == NULL) {
+        pmd_table = (addr_t *)calloc(512, sizeof(addr_t));
+        pud_table[pud] = (addr_t)pmd_table;
+    }
+
+    // 6. Tầng PT (Page Table)
+    addr_t *pt_table = (addr_t *)pmd_table[pmd];
+    if (pt_table == NULL) {
+        pt_table = (addr_t *)calloc(512, sizeof(addr_t));
+        pmd_table[pmd] = (addr_t)pt_table;
+    }
+
+    // Trả về địa chỉ của entry để thao tác
+    return &pt_table[pt];
+}
+
+
+
 /*
  * init_pte - Initialize PTE entry
  */
@@ -107,58 +192,21 @@ int get_pd_from_pagenum(addr_t pgn, addr_t *pgd, addr_t *p4d, addr_t *pud, addr_
  */
 int pte_set_swap(struct pcb_t *caller, addr_t pgn, int swptyp, addr_t swpoff)
 {
-  struct krnl_t *krnl = caller->krnl;
-
+ struct krnl_t *krnl = caller->krnl; // Mở comment để lấy krnl
   addr_t *pte;
-  addr_t pgd = 0;
-  addr_t p4d = 0;
-  addr_t pud = 0;
-  addr_t pmd = 0;
-  addr_t pt = 0;
 
-  // dummy pte alloc to avoid runtime error
-  // pte = malloc(sizeof(addr_t));
 #ifdef MM64
-  /* Get value from the system */
-  /* TODO Perform multi-level page mapping */
-  get_pd_from_pagenum(pgn, &pgd, &p4d, &pud, &pmd, &pt);
-  //... krnl->mm->pgd
-  //... krnl->mm->pt
-  // pte = &krnl->mm->pt;
-  if (krnl->mm->pgd == NULL)
-  {
-    krnl->mm->pgd = (addr_t *)calloc(512, sizeof(addr_t));
-  }
-  addr_t *p4d_table = (addr_t *)krnl->mm->pgd[pgd];
-  if (p4d_table == NULL)
-  {
-    p4d_table = (addr_t *)calloc(512, sizeof(addr_t));
-    krnl->mm->pgd[pgd] = (addr_t)p4d_table;
-  }
-  addr_t *pud_table = (addr_t *)p4d_table[p4d];
-  if (pud_table == NULL)
-  {
-    pud_table = (addr_t *)calloc(512, sizeof(addr_t));
-    p4d_table[p4d] = (addr_t)pud_table;
-  }
-  addr_t *pmd_table = (addr_t *)pud_table[pud];
-  if (pmd_table == NULL)
-  {
-    pmd_table = (addr_t *)calloc(512, sizeof(addr_t));
-    pud_table[pud] = (addr_t)pmd_table;
-  }
-  addr_t *pt_table = (addr_t *)pmd_table[pmd];
-  if (pt_table == NULL)
-  {
-    pt_table = (addr_t *)calloc(512, sizeof(addr_t));
-    pmd_table[pmd] = (addr_t)pt_table;
-  }
-
-  pte = &pt_table[pt];
+  /* 1. Phục hồi địa chỉ ảo từ pgn (Dịch trái 12 bit) */
+  addr_t vaddr = pgn << PAGING64_ADDR_PT_LOBIT;
+  
+  /* 2. Dùng Helper lội 5 tầng để tìm PTE (tự động calloc nếu thiếu mảng) */
+  pte = get_pte_ptr_alloc(krnl->mm, vaddr);
+  if (pte == NULL) return -1; // Lỗi hết RAM cấp phát bảng trang
 #else
   pte = &krnl->mm->pgd[pgn];
 #endif
 
+  /* 3. Tận dụng 100% code thao tác bit của bạn */
   SETBIT(*pte, PAGING_PTE_PRESENT_MASK);
   SETBIT(*pte, PAGING_PTE_SWAPPED_MASK);
 
@@ -175,58 +223,21 @@ int pte_set_swap(struct pcb_t *caller, addr_t pgn, int swptyp, addr_t swpoff)
  */
 int pte_set_fpn(struct pcb_t *caller, addr_t pgn, addr_t fpn)
 {
-  struct krnl_t *krnl = caller->krnl;
-
+ struct krnl_t *krnl = caller->krnl;
   addr_t *pte;
-  addr_t pgd = 0;
-  addr_t p4d = 0;
-  addr_t pud = 0;
-  addr_t pmd = 0;
-  addr_t pt = 0;
 
-  // dummy pte alloc to avoid runtime error
-  // pte = malloc(sizeof(addr_t));
 #ifdef MM64
-  /* Get value from the system */
-  /* TODO Perform multi-level page mapping */
-  get_pd_from_pagenum(pgn, &pgd, &p4d, &pud, &pmd, &pt);
-  //... krnl->mm->pgd
-  //... krnl->mm->pt
-  // pte = &krnl->mm->pt;
-  if (krnl->mm->pgd == NULL)
-  {
-    krnl->mm->pgd = (addr_t *)calloc(512, sizeof(addr_t));
-  }
-  addr_t *p4d_table = (addr_t *)krnl->mm->pgd[pgd];
-  if (p4d_table == NULL)
-  {
-    p4d_table = (addr_t *)calloc(512, sizeof(addr_t));
-    krnl->mm->pgd[pgd] = (addr_t)p4d_table;
-  }
-  addr_t *pud_table = (addr_t *)p4d_table[p4d];
-  if (pud_table == NULL)
-  {
-    pud_table = (addr_t *)calloc(512, sizeof(addr_t));
-    p4d_table[p4d] = (addr_t)pud_table;
-  }
-  addr_t *pmd_table = (addr_t *)pud_table[pud];
-  if (pmd_table == NULL)
-  {
-    pmd_table = (addr_t *)calloc(512, sizeof(addr_t));
-    pud_table[pud] = (addr_t)pmd_table;
-  }
-  addr_t *pt_table = (addr_t *)pmd_table[pmd];
-  if (pt_table == NULL)
-  {
-    pt_table = (addr_t *)calloc(512, sizeof(addr_t));
-    pmd_table[pmd] = (addr_t)pt_table;
-  }
-
-  pte = &pt_table[pt];
+  /* 1. Phục hồi địa chỉ ảo từ pgn */
+  addr_t vaddr = pgn << PAGING64_ADDR_PT_LOBIT;
+  
+  /* 2. Lội 5 tầng tìm/cấp phát PTE */
+  pte = get_pte_ptr_alloc(krnl->mm, vaddr);
+  if (pte == NULL) return -1;
 #else
   pte = &krnl->mm->pgd[pgn];
 #endif
 
+  /* 3. Tận dụng 100% code thao tác bit của bạn */
   SETBIT(*pte, PAGING_PTE_PRESENT_MASK);
   CLRBIT(*pte, PAGING_PTE_SWAPPED_MASK);
 
@@ -243,38 +254,24 @@ int pte_set_fpn(struct pcb_t *caller, addr_t pgn, addr_t fpn)
 uint32_t pte_get_entry(struct pcb_t *caller, addr_t pgn)
 {
   // struct krnl_t *krnl = caller->krnl;
+  struct krnl_t *krnl = caller->krnl;
   uint32_t pte = 0;
-  addr_t pgd = 0;
-  addr_t p4d = 0;
-  addr_t pud = 0;
-  addr_t pmd = 0;
-  addr_t pt = 0;
 
-  /* TODO Perform multi-level page mapping */
-  get_pd_from_pagenum(pgn, &pgd, &p4d, &pud, &pmd, &pt);
-  //... krnl->mm->pgd
-  //... krnl->mm->pt
-  // pte = &krnl->mm->pt;
-  if (caller->krnl->mm->pgd == NULL)
-    return 0;
+#ifdef MM64
+  /* 1. Phục hồi địa chỉ ảo từ pgn */
+  addr_t vaddr = pgn << PAGING64_ADDR_PT_LOBIT;
+  
+  /* 2. Dùng Helper KHÔNG cấp phát để dò đường 5 tầng */
+  addr_t *pte_ptr = get_pte_ptr_no_alloc(krnl->mm, vaddr);
+  
+  /* 3. Trả về giá trị PTE nếu tìm thấy, ngược lại trả về 0 (chuẩn code gà của bạn) */
+  if (pte_ptr != NULL) {
+      pte = (uint32_t)(*pte_ptr); // Ép kiểu về uint32_t theo đúng skeleton của thầy
+  }
+#else
+  pte = krnl->mm->pgd[pgn];
+#endif
 
-  addr_t *p4d_table = (addr_t *)caller->krnl->mm->pgd[pgd];
-  if (p4d_table == NULL)
-    return 0;
-
-  addr_t *pud_table = (addr_t *)p4d_table[p4d];
-  if (pud_table == NULL)
-    return 0;
-
-  addr_t *pmd_table = (addr_t *)pud_table[pud];
-  if (pmd_table == NULL)
-    return 0;
-
-  addr_t *pt_table = (addr_t *)pmd_table[pmd];
-  if (pt_table == NULL)
-    return 0;
-
-  pte = pt_table[pt];
   return pte;
 }
 
@@ -298,66 +295,36 @@ int vmap_pgd_memset(struct pcb_t *caller, // process call
                     addr_t addr,          // start address which is aligned to pagesz
                     int pgnum)            // num of mapping page
 {
-  // int pgit = 0;
-  // uint64_t pattern = 0xdeadbeef;
-
-  /* TODO memset the page table with given pattern
-   */
-  if (caller == NULL || caller->krnl->mm == NULL || pgnum <= 0)
+  /* 1. Kế thừa nguyên vẹn chốt chặn an toàn của bạn */
+  if (caller == NULL || caller->krnl == NULL || caller->krnl->mm == NULL || pgnum <= 0)
   {
     return -1;
   }
 
-  // Căn lề địa chỉ (page-aligned)
-  // if (addr % PAGING64_PAGESZ != 0) {
-  //     addr = addr & ~(PAGING64_PAGESZ - 1);
-  // }
-
+  /* 2. Kế thừa logic ép căn lề (Align down) cực kỳ chặt chẽ của bạn */
   if (addr % PAGING64_PAGESZ != 0)
   {
     printf("WARNING vmap_pgd_memset: address 0x%lx not page-aligned, aligning...\n", addr);
-    addr = addr & ~(PAGING64_PAGESZ - 1); /* Align down to page boundary */
+    addr = addr & ~(PAGING64_PAGESZ - 1); 
   }
-  addr_t pgn_start = PAGING64_PGN(addr); // new fix 23/5/2020 1:37pm
+
+  /* 3. Lặp qua từng trang và gọi Helper */
+  addr_t curr_addr = addr;
 
   for (int i = 0; i < pgnum; i++)
   {
-    addr_t current_pgn = pgn_start + i;
+    
+    addr_t *pte = get_pte_ptr_alloc(caller->krnl->mm, curr_addr);
 
-    addr_t pgd_idx = 0, p4d_idx = 0, pud_idx = 0, pmd_idx = 0, pt_idx = 0;
-    get_pd_from_pagenum(current_pgn, &pgd_idx, &p4d_idx, &pud_idx, &pmd_idx, &pt_idx);
-
-    if (caller->krnl->mm->pgd == NULL)
+    if (pte != NULL)
     {
-      caller->krnl->mm->pgd = (addr_t *)calloc(512, sizeof(addr_t));
-    }
-    addr_t *p4d_table = (addr_t *)caller->krnl->mm->pgd[pgd_idx];
-    if (p4d_table == NULL)
-    {
-      p4d_table = (addr_t *)calloc(512, sizeof(addr_t));
-      caller->krnl->mm->pgd[pgd_idx] = (addr_t)p4d_table;
-    }
-    addr_t *pud_table = (addr_t *)p4d_table[p4d_idx];
-    if (pud_table == NULL)
-    {
-      pud_table = (addr_t *)calloc(512, sizeof(addr_t));
-      p4d_table[p4d_idx] = (addr_t)pud_table;
-    }
-    addr_t *pmd_table = (addr_t *)pud_table[pud_idx];
-    if (pmd_table == NULL)
-    {
-      pmd_table = (addr_t *)calloc(512, sizeof(addr_t));
-      pud_table[pud_idx] = (addr_t)pmd_table;
-    }
-    addr_t *pt_table = (addr_t *)pmd_table[pmd_idx];
-    if (pt_table == NULL)
-    {
-      pt_table = (addr_t *)calloc(512, sizeof(addr_t));
-      pmd_table[pmd_idx] = (addr_t)pt_table;
+      *pte = 0; // Đánh dấu trang rỗng (như pt_table[pt_idx] = 0; ở code cũ)
     }
 
-    pt_table[pt_idx] = 0;
+    /* Nhảy sang địa chỉ ảo của trang tiếp theo (cộng thêm 4096 bytes) */
+    curr_addr += PAGING64_PAGESZ; 
   }
+  
   return 0;
 }
 
