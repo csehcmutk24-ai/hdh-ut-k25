@@ -154,18 +154,44 @@ int init_pte(addr_t *pte,
  * @pmd   : page middle directory
  * @pt    : page table
  */
-int get_pd_from_address(addr_t addr, addr_t *pgd, addr_t *p4d, addr_t *pud, addr_t *pmd, addr_t *pt)
+addr_t* get_pd_from_address(struct pcb_t *caller, addr_t addr, int is_kernel)
 {
-  /* Extract page direactories */
-  *pgd = (addr & PAGING64_ADDR_PGD_MASK) >> PAGING64_ADDR_PGD_LOBIT;
-  *p4d = (addr & PAGING64_ADDR_P4D_MASK) >> PAGING64_ADDR_P4D_LOBIT;
-  *pud = (addr & PAGING64_ADDR_PUD_MASK) >> PAGING64_ADDR_PUD_LOBIT;
-  *pmd = (addr & PAGING64_ADDR_PMD_MASK) >> PAGING64_ADDR_PMD_LOBIT;
-  *pt = (addr & PAGING64_ADDR_PT_MASK) >> PAGING64_ADDR_PT_LOBIT;
+  if (caller == NULL) return NULL;
 
-  /* TODO: implement the page direactories mapping */
+  addr_t *root_pgd = is_kernel ? (addr_t *)caller->krnl->krnl_pgd : (addr_t *)caller->krnl->mm->pgd;
+  if (root_pgd == NULL) return NULL;
 
-  return 0;
+  addr_t pgd = (addr & PAGING64_ADDR_PGD_MASK) >> PAGING64_ADDR_PGD_LOBIT;
+  addr_t p4d = (addr & PAGING64_ADDR_P4D_MASK) >> PAGING64_ADDR_P4D_LOBIT;
+  addr_t pud = (addr & PAGING64_ADDR_PUD_MASK) >> PAGING64_ADDR_PUD_LOBIT;
+  addr_t pmd = (addr & PAGING64_ADDR_PMD_MASK) >> PAGING64_ADDR_PMD_LOBIT;
+  addr_t pt  = (addr & PAGING64_ADDR_PT_MASK) >> PAGING64_ADDR_PT_LOBIT;
+
+  addr_t *p4d_table = (addr_t *)root_pgd[pgd];
+  if (p4d_table == NULL) {
+      p4d_table = (addr_t *)calloc(512, sizeof(addr_t));
+      root_pgd[pgd] = (addr_t)p4d_table;
+  }
+
+  addr_t *pud_table = (addr_t *)p4d_table[p4d];
+  if (pud_table == NULL) {
+      pud_table = (addr_t *)calloc(512, sizeof(addr_t));
+      p4d_table[p4d] = (addr_t)pud_table;
+  }
+
+  addr_t *pmd_table = (addr_t *)pud_table[pud];
+  if (pmd_table == NULL) {
+      pmd_table = (addr_t *)calloc(512, sizeof(addr_t));
+      pud_table[pud] = (addr_t)pmd_table;
+  }
+
+  addr_t *pt_table = (addr_t *)pmd_table[pmd];
+  if (pt_table == NULL) {
+      pt_table = (addr_t *)calloc(512, sizeof(addr_t));
+      pmd_table[pmd] = (addr_t)pt_table;
+  }
+
+  return &pt_table[pt];
 }
 
 /*
@@ -179,9 +205,13 @@ int get_pd_from_address(addr_t addr, addr_t *pgd, addr_t *p4d, addr_t *pud, addr
  */
 int get_pd_from_pagenum(addr_t pgn, addr_t *pgd, addr_t *p4d, addr_t *pud, addr_t *pmd, addr_t *pt)
 {
-  /* Shift the address to get page num and perform the mapping*/
-  return get_pd_from_address(pgn << PAGING64_ADDR_PT_SHIFT,
-                             pgd, p4d, pud, pmd, pt);
+  addr_t addr = pgn << PAGING64_ADDR_PT_SHIFT;
+  *pgd = (addr & PAGING64_ADDR_PGD_MASK) >> PAGING64_ADDR_PGD_LOBIT;
+  *p4d = (addr & PAGING64_ADDR_P4D_MASK) >> PAGING64_ADDR_P4D_LOBIT;
+  *pud = (addr & PAGING64_ADDR_PUD_MASK) >> PAGING64_ADDR_PUD_LOBIT;
+  *pmd = (addr & PAGING64_ADDR_PMD_MASK) >> PAGING64_ADDR_PMD_LOBIT;
+  *pt = (addr & PAGING64_ADDR_PT_MASK) >> PAGING64_ADDR_PT_LOBIT;
+  return 0;
 }
 
 /*
