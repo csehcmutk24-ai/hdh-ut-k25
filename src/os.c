@@ -33,17 +33,6 @@ struct mmpaging_ld_args {
 };
 #endif
 
-#ifdef MM_PAGING
-static void use_default_mem_config(void) {
-	int sit;
-
-	memramsz = 0x10000000;
-	memswpsz[0] = 0x1000000;
-	for (sit = 1; sit < PAGING_MAX_MMSWP; sit++)
-		memswpsz[sit] = 0;
-}
-#endif
-
 static struct ld_args{
 	char ** path;
 	unsigned long * start_time;
@@ -57,27 +46,6 @@ struct cpu_args {
 	struct timer_id_t * timer_id;
 	int id;
 };
-
-static void parse_process_config_line(const char * line, int index) {
-	char proc[100];
-	int parsed;
-
-	ld_processes.path[index] = (char*)malloc(sizeof(char) * 100);
-	ld_processes.path[index][0] = '\0';
-	strcat(ld_processes.path[index], "input/proc/");
-#ifdef MLQ_SCHED
-	parsed = sscanf(line, "%lu %99s %lu",
-		&ld_processes.start_time[index], proc, &ld_processes.prio[index]);
-	if (parsed != 3) {
-#else
-	parsed = sscanf(line, "%lu %99s", &ld_processes.start_time[index], proc);
-	if (parsed != 2) {
-#endif
-		printf("Invalid process config line: %s", line);
-		exit(1);
-	}
-	strcat(ld_processes.path[index], proc);
-}
 
 
 static void * cpu_routine(void * args) {
@@ -208,28 +176,29 @@ static void read_config(const char * path) {
 	ld_processes.path = (char**)malloc(sizeof(char*) * num_processes);
 	ld_processes.start_time = (unsigned long*)
 		malloc(sizeof(unsigned long) * num_processes);
-	char first_process_line[256];
-	int has_first_process_line = 0;
 #ifdef MM_PAGING
+	int sit;
+#ifdef MM_FIXED_MEMSZ
+	/* We provide here a back compatible with legacy OS simulatiom config file
+         * In which, it have no addition config line for Mema, keep only one line
+	 * for legacy info 
+         *  [time slice] [N = Number of CPU] [M = Number of Processes to be run]
+         */
+        memramsz  =  0x100000000;
+        memswpsz[0] = 0x1000000;
+	for(sit = 1; sit < PAGING_MAX_MMSWP; sit++)
+		memswpsz[sit] = 0;
+#else
 	/* Read input config of memory size: MEMRAM and upto 4 MEMSWP (mem swap)
 	 * Format: (size=0 result non-used memswap, must have RAM and at least 1 SWAP)
 	 *        MEM_RAM_SZ MEM_SWP0_SZ MEM_SWP1_SZ MEM_SWP2_SZ MEM_SWP3_SZ
-	 *
-	 * Legacy scheduler configs do not have this line. In that case, the line
-	 * read here is the first process line and default memory sizes are used.
 	*/
-	if (fgets(first_process_line, sizeof(first_process_line), file) == NULL) {
-		printf("Missing memory or process config in %s\n", path);
-		exit(1);
-	}
-	char extra;
-	int mem_fields = sscanf(first_process_line,
-		FORMAT_ARG " " FORMAT_ARG " " FORMAT_ARG " " FORMAT_ARG " " FORMAT_ARG " %c",
-		&memramsz, &memswpsz[0], &memswpsz[1], &memswpsz[2], &memswpsz[3], &extra);
-	if (mem_fields != 5) {
-		use_default_mem_config();
-		has_first_process_line = 1;
-	}
+	fscanf(file, FORMAT_ARG "\n", &memramsz);
+	for(sit = 0; sit < PAGING_MAX_MMSWP; sit++)
+		fscanf(file, FORMAT_ARG, &(memswpsz[sit])); 
+
+       fscanf(file, "\n"); /* Final character */
+#endif
 #endif
 
 #ifdef MLQ_SCHED
@@ -238,15 +207,16 @@ static void read_config(const char * path) {
 #endif
 	int i;
 	for (i = 0; i < num_processes; i++) {
-		char process_line[256];
-		if (has_first_process_line) {
-			strcpy(process_line, first_process_line);
-			has_first_process_line = 0;
-		} else if (fgets(process_line, sizeof(process_line), file) == NULL) {
-			printf("Missing process config line %d in %s\n", i, path);
-			exit(1);
-		}
-		parse_process_config_line(process_line, i);
+		ld_processes.path[i] = (char*)malloc(sizeof(char) * 100);
+		ld_processes.path[i][0] = '\0';
+		strcat(ld_processes.path[i], "input/proc/");
+		char proc[100];
+#ifdef MLQ_SCHED
+		fscanf(file, "%lu %s %lu\n", &ld_processes.start_time[i], proc, &ld_processes.prio[i]);
+#else
+		fscanf(file, "%lu %s\n", &ld_processes.start_time[i], proc);
+#endif
+		strcat(ld_processes.path[i], proc);
 	}
 }
 
@@ -329,3 +299,5 @@ int main(int argc, char * argv[]) {
 	return 0;
 
 }
+
+
