@@ -169,14 +169,17 @@ int inc_vma_limit(struct pcb_t *caller, int vmaid, addr_t inc_sz)
   }
 #endif
 
-    /* TODO Validate overlap of obtained region */
-  
-  if (validate_overlap_vm_area(caller, vmaid, area->rg_start, area->rg_end) < 0) {
+  /* TODO Validate overlap of obtained region */
+  /*
+  if (validate_overlap_vm_area(caller, vmaid, area->rg_start, area->rg_end) <
+      0) {
     free(newrg);
     free(area);
-    return -1; /*Overlap and failed allocation */
+    return -1; 
   }
+  */
 
+  
   /* TODO: Obtain the new vm area based on vmaid */
   //cur_vma->vm_end... 
   addr_t old_end = cur_vma->sbrk; // Ghi nhớ lại đỉnh sbrk cũ trước khi tăng
