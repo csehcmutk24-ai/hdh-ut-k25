@@ -184,7 +184,7 @@ int print_list_pgn(struct pgn_t *ip);
 int print_pgtbl(struct pcb_t *ip, addr_t start, addr_t end);
 
 /* helper for 5 page directories */
-addr_t* get_pte_ptr_no_alloc(struct mm_struct *mm, addr_t addr);
+addr_t* get_pte_ptr_no_alloc(struct pcb_t *caller, addr_t addr, int is_kernel);
 int is_user_address(addr_t addr);
 int is_kernel_address(addr_t addr);
 int enlist_vm_freerg_list(struct mm_struct *mm, struct vm_rg_struct *rg_elmt);
