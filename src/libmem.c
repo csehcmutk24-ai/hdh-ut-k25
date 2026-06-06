@@ -740,7 +740,7 @@ int __read_kernel_mem(struct pcb_t *caller, int vmaid, int rgid, addr_t offset, 
 
   /* 2. LỘI 5 TẦNG BẰNG HELPER (Thay cho đoạn get_pd_from_address cồng kềnh) */
   // Helper này đã tự xử lý 5 tầng if(NULL) và tự gọt bỏ phần 0xFF... của Kernel
-  addr_t *pte = get_pte_ptr_no_alloc(caller->krnl->mm, access_addr);
+  addr_t *pte = get_pte_ptr_no_alloc(caller, access_addr, 1);
 
   if (pte == NULL || !PAGING_PAGE_PRESENT(*pte)) {
       // Báo lỗi Page Fault (Kernel bắt buộc phải nằm trên RAM, không dùng SWAP)
@@ -781,7 +781,7 @@ int __write_kernel_mem(struct pcb_t *caller, int vmaid, int rgid, addr_t offset,
   }
 
   /* 2. Lội 5 tầng bằng Helper */
-  addr_t *pte = get_pte_ptr_no_alloc(caller->krnl->mm, access_addr);
+  addr_t *pte = get_pte_ptr_no_alloc(caller, access_addr, 1);
 
   if (pte == NULL || !PAGING_PAGE_PRESENT(*pte)) {
       printf("KERNEL PAGE FAULT: Khong the ghi vao dia chi 0x%lx\n", access_addr);
