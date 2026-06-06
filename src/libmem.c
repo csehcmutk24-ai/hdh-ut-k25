@@ -1025,17 +1025,16 @@ int get_free_vmrg_area(struct pcb_t *caller, int vmaid, int size, struct vm_rg_s
   return 0;
 }
 
-/* Kiểm tra xem địa chỉ có thuộc User Space (VMA0) không */
-int is_user_address(addr_t addr) {
-    return (addr >> 57) == 0;
-}
 
+int is_user_address(addr_t addr) {
+    return (addr >= USER_START && addr <= USER_END);
+}
 
 int is_kernel_address(addr_t addr) {
-
-    return (addr >> 57) == 0x7F;
+    return ((addr >= KERNEL_DIRECT_START && addr <= KERNEL_DIRECT_END) ||
+            (addr >= KERNEL_ALLOC_START  && addr <= KERNEL_ALLOC_END)  ||
+            (addr >= KERNEL_PGTBL_START  && addr <= KERNEL_PGTBL_END));
 }
-
 
 
 // #endif
