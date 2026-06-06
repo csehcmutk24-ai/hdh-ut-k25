@@ -26,7 +26,13 @@
 
 /* Helper nội bộ: Lội 5 tầng tìm PTE (Không cấp phát thêm) */
 addr_t* get_pte_ptr_no_alloc(struct mm_struct *mm, addr_t addr) {
-    if (mm == NULL || mm->pgd == NULL) return NULL;
+    if (caller == NULL || caller->krnl == NULL)
+        return NULL;
+
+    addr_t *root_pgd = is_kernel ? (addr_t *)caller->krnl->krnl_pgd
+                               : (addr_t *)caller->krnl->mm->pgd;
+    if (root_pgd == NULL)
+        return NULL;
 
     // Tách 5 index và tự động triệt tiêu bit Canonical bằng macro trong mm64.h
     addr_t pgd = PAGING64_ADDR_PGD(addr);
@@ -35,7 +41,7 @@ addr_t* get_pte_ptr_no_alloc(struct mm_struct *mm, addr_t addr) {
     addr_t pmd = PAGING64_ADDR_PMD(addr);
     addr_t pt  = PAGING64_ADDR_PT(addr);
 
-    addr_t *p4d_table = (addr_t *)mm->pgd[pgd];
+    addr_t *p4d_table = (addr_t *)root_pgd[pgd];
     if (p4d_table == NULL) return NULL;
 
     addr_t *pud_table = (addr_t *)p4d_table[p4d];
@@ -183,7 +189,7 @@ int pte_set_swap(struct pcb_t *caller, addr_t pgn, int swptyp, addr_t swpoff)
   pte = &krnl->mm->pgd[pgn];
 #endif
 
-  /* 3. Tận dụng 100% code thao tác bit của bạn */
+  /* 3. Tận dụng 100% code thao tác bit  */
   SETBIT(*pte, PAGING_PTE_PRESENT_MASK);
   SETBIT(*pte, PAGING_PTE_SWAPPED_MASK);
 
@@ -214,7 +220,7 @@ int pte_set_fpn(struct pcb_t *caller, addr_t pgn, addr_t fpn)
   pte = &krnl->mm->pgd[pgn];
 #endif
 
-  /* 3. Tận dụng 100% code thao tác bit của bạn */
+  /* 3. Tận dụng 100% code thao tác bit  */
   SETBIT(*pte, PAGING_PTE_PRESENT_MASK);
   CLRBIT(*pte, PAGING_PTE_SWAPPED_MASK);
 
@@ -239,9 +245,9 @@ uint32_t pte_get_entry(struct pcb_t *caller, addr_t pgn)
   addr_t vaddr = pgn << PAGING64_ADDR_PT_LOBIT;
   
   /* 2. Dùng Helper KHÔNG cấp phát để dò đường 5 tầng */
-  addr_t *pte_ptr = get_pte_ptr_no_alloc(krnl->mm, vaddr);
+  addr_t *pte_ptr = get_pte_ptr_no_alloc(caller, vaddr, 0);
   
-  /* 3. Trả về giá trị PTE nếu tìm thấy, ngược lại trả về 0 (chuẩn code gà của bạn) */
+  /* 3. Trả về giá trị PTE nếu tìm thấy, ngược lại trả về 0  */
   if (pte_ptr != NULL) {
       pte = (uint32_t)(*pte_ptr); // Ép kiểu về uint32_t theo đúng skeleton của thầy
   }
@@ -272,13 +278,13 @@ int vmap_pgd_memset(struct pcb_t *caller, // process call
                     addr_t addr,          // start address which is aligned to pagesz
                     int pgnum)            // num of mapping page
 {
-  /* 1. Kế thừa nguyên vẹn chốt chặn an toàn của bạn */
+  /* 1. Kế thừa nguyên vẹn chốt chặn an toàn  */
   if (caller == NULL || caller->krnl == NULL || caller->krnl->mm == NULL || pgnum <= 0)
   {
     return -1;
   }
 
-  /* 2. Kế thừa logic ép căn lề (Align down) cực kỳ chặt chẽ của bạn */
+  /* 2. Kế thừa logic ép căn lề (Align down) cực kỳ chặt chẽ  */
   if (addr % PAGING64_PAGESZ != 0)
   {
     printf("WARNING vmap_pgd_memset: address 0x%lx not page-aligned, aligning...\n", addr);
@@ -295,7 +301,7 @@ int vmap_pgd_memset(struct pcb_t *caller, // process call
 
     if (pte != NULL)
     {
-      *pte = 0; // Đánh dấu trang rỗng (như pt_table[pt_idx] = 0; ở code cũ)
+      *pte = 0; // Đánh dấu trang rỗng 
     }
 
     /* Nhảy sang địa chỉ ảo của trang tiếp theo (cộng thêm 4096 bytes) */
