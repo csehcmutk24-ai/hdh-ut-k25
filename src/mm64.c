@@ -53,59 +53,6 @@ addr_t* get_pte_ptr_no_alloc(struct mm_struct *mm, addr_t addr) {
 
 
 
-/* * Helper: Lội cây 5 cấp và cấp phát lười (Lazy Allocation)
- * Nhờ các macro trong mm64.h, các bit Canonical (top 7 bit) tự động bị triệt tiêu
- * Index sinh ra luôn an toàn trong khoảng 0-511.
- */
-addr_t* get_pte_ptr_alloc(struct mm_struct *mm, addr_t addr) {
-    if (mm == NULL) return NULL;
-
-    // 1. Tách 5 index bằng macro của mm64.h
-    addr_t pgd = PAGING64_ADDR_PGD(addr);
-    addr_t p4d = PAGING64_ADDR_P4D(addr);
-    addr_t pud = PAGING64_ADDR_PUD(addr);
-    addr_t pmd = PAGING64_ADDR_PMD(addr);
-    addr_t pt  = PAGING64_ADDR_PT(addr);
-
-    // 2. Tầng PGD
-    if (mm->pgd == NULL) {
-        mm->pgd = (addr_t *)calloc(512, sizeof(addr_t));
-    }
-    
-    // 3. Tầng P4D
-    addr_t *p4d_table = (addr_t *)mm->pgd[pgd];
-    if (p4d_table == NULL) {
-        p4d_table = (addr_t *)calloc(512, sizeof(addr_t));
-        mm->pgd[pgd] = (addr_t)p4d_table;
-    }
-
-    // 4. Tầng PUD
-    addr_t *pud_table = (addr_t *)p4d_table[p4d];
-    if (pud_table == NULL) {
-        pud_table = (addr_t *)calloc(512, sizeof(addr_t));
-        p4d_table[p4d] = (addr_t)pud_table;
-    }
-
-    // 5. Tầng PMD
-    addr_t *pmd_table = (addr_t *)pud_table[pud];
-    if (pmd_table == NULL) {
-        pmd_table = (addr_t *)calloc(512, sizeof(addr_t));
-        pud_table[pud] = (addr_t)pmd_table;
-    }
-
-    // 6. Tầng PT (Page Table)
-    addr_t *pt_table = (addr_t *)pmd_table[pmd];
-    if (pt_table == NULL) {
-        pt_table = (addr_t *)calloc(512, sizeof(addr_t));
-        pmd_table[pmd] = (addr_t)pt_table;
-    }
-
-    // Trả về địa chỉ của entry để thao tác
-    return &pt_table[pt];
-}
-
-
-
 /*
  * init_pte - Initialize PTE entry
  */
@@ -230,7 +177,7 @@ int pte_set_swap(struct pcb_t *caller, addr_t pgn, int swptyp, addr_t swpoff)
   addr_t vaddr = pgn << PAGING64_ADDR_PT_LOBIT;
   
   /* 2. Dùng Helper lội 5 tầng để tìm PTE (tự động calloc nếu thiếu mảng) */
-  pte = get_pte_ptr_alloc(krnl->mm, vaddr);
+   pte = get_pd_from_address(caller, vaddr, 0);
   if (pte == NULL) return -1; // Lỗi hết RAM cấp phát bảng trang
 #else
   pte = &krnl->mm->pgd[pgn];
@@ -261,7 +208,7 @@ int pte_set_fpn(struct pcb_t *caller, addr_t pgn, addr_t fpn)
   addr_t vaddr = pgn << PAGING64_ADDR_PT_LOBIT;
   
   /* 2. Lội 5 tầng tìm/cấp phát PTE */
-  pte = get_pte_ptr_alloc(krnl->mm, vaddr);
+ pte = get_pd_from_address(caller, vaddr, 0);
   if (pte == NULL) return -1;
 #else
   pte = &krnl->mm->pgd[pgn];
@@ -344,7 +291,7 @@ int vmap_pgd_memset(struct pcb_t *caller, // process call
   for (int i = 0; i < pgnum; i++)
   {
     
-    addr_t *pte = get_pte_ptr_alloc(caller->krnl->mm, curr_addr);
+    addr_t *pte = get_pd_from_address(caller, curr_addr, 0);
 
     if (pte != NULL)
     {
